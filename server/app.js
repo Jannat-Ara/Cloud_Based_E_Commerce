@@ -1,8 +1,18 @@
 const express =require('express')
 const serverless = require('serverless-http')
-const responseUtil = require('./utils/common');
+const bcrypt = require('bcryptjs');
+const validator = require('validator');
+const jwt = require('jsonwebtoken');
+const userModel = require('./model/userModel');
 const productModel = require('./model/productModel');
+const responseUtil = require('./utils/common');
+const cors = require("cors");
 const app = express();
+
+const createToken = (id) => {
+    return jwt.sign({ id }, process.env.JWT_SECRET);
+};
+app.use(cors({origin:"*"}));
 app.use(express.json());
 
 
@@ -99,7 +109,6 @@ app.patch('/products/:id', async (event, res) => {
         return responseUtil.error('Error updating product', error.message || error);
     }
 });
-
 app.delete('/products/:id', async (req, res) => {
     try {
         const productId = req.params.id;
@@ -111,6 +120,126 @@ app.delete('/products/:id', async (req, res) => {
         res.status(500).json(responseUtil.error('Error deleting product'));
     }
 });
+app.post('/register', async (event, res) => {
+     const { name, email, password } = JSON.parse(event.body);
+    try {
+        if (!email || !password) {
+            return res.status(400).json(responseUtil.error('Email and password are required'));
+        }
 
+        if (!validator.isEmail(email)) {
+            return res.status(400).json(responseUtil.error('Invalid email format'));
+        }
+        if (!validator.isStrongPassword(password)) {
+            return res.status(400).json(responseUtil.error('Please enter a strong password'));
+        }
+        const existingUser = await userModel.getUserByEmail(email);
+        if (existingUser) {
+            return res.status(400).json(responseUtil.error('User already exists'));
+        }
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        const user = await userModel.createUser({
+            name,
+            email,
+            password: hashedPassword,
+            cartData: []
+        });
+        
+        const token = createToken(user.id);
+
+        res.status(201).json(responseUtil.success({ token,
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                cartData: user.cartData
+            }}));
+    } catch (error) {
+        console.error('Error registering user:', error);
+        res.status(500).json(responseUtil.error('Error registering user'));
+    }
+});
 
 module.exports.handler = serverless(app)
+
+// const express =require('express')
+// const serverless = require('serverless-http')
+// const bcrypt = require('bcryptjs');
+// const validator = require('validator');
+// const jwt = require('jsonwebtoken');
+// const userModel = require('./model/cartModel');
+// const responseUtil = require('./utils/common');
+// const { getUserIdFromEvent } = require('./utils/jwtUtils');
+// const cors = require("cors");
+// const app = express();
+
+// const createToken = (id) => {
+//     return jwt.sign({ id }, process.env.JWT_SECRET);
+// };
+// app.use(cors({origin:"*"}));
+// app.use(express.json());
+
+
+// // Define root route
+// app.get('/', (req, res) => {
+//     res.status(200).json({ message: 'Welcome to the API!' });
+// });
+// app.post('/carts', async (event, res) => {
+//     try {
+//         // 1. Extract and validate user ID
+//         const userId = getUserIdFromEvent(event);
+//         if (!userId) {
+//             return res.status(401).json(responseUtil.error('Unauthorized - Invalid or missing token'));
+//         }
+
+//         // 2. Parse and validate request body
+//         const requestBody = JSON.parse(event.body || '{}');
+//         const { productId, quantity = 1 } = requestBody;
+
+//         if (!productId) {
+//             return res.status(400).json(responseUtil.error('Product ID is required'));
+//         }
+
+//         if (isNaN(quantity) || quantity < 1) {
+//             return res.status(400).json(responseUtil.error('Quantity must be a number greater than 0'));
+//         }
+
+//         // 3. Verify product exists
+//         const product = await productModel.getProductById(productId);
+//         if (!product?.id) {
+//             return res.status(404).json(responseUtil.error('Product not found'));
+//         }
+
+//         // 4. Add to cart
+//         await cartModel.addToCart(userId, product.id, Number(quantity));
+
+//         // 5. Return success response
+//         return res.status(201).json(responseUtil.success({
+//             message: 'Item added to cart',
+//             product: {
+//                 id: product.id,
+//                 name: product.name,
+//                 price: product.price,
+//                 image: product.images?.[0] 
+//             },
+//             quantity: Number(quantity)
+//         }));
+
+//     } catch (error) {
+//         console.error('Cart addition error:', {
+//             error: error.message,
+//             stack: error.stack,
+//             event: JSON.stringify(event, null, 2)
+//         });
+        
+//         if (error instanceof SyntaxError) {
+//             return res.status(400).json(responseUtil.error('Invalid JSON format'));
+//         }
+        
+//         res.status(500).json(responseUtil.error(error.message));
+//     }
+// });
+
+
+// module.exports.handler = serverless(app)
